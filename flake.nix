@@ -38,8 +38,8 @@
         json-glib
 	libarchive
         libadwaita
-				libsecret
-				libsoup_3
+        libsecret
+        libsoup_3
 				libxml2
 				libportal-gtk4
 				sqlite
@@ -53,7 +53,7 @@
 
     shellHook =
         #"deno run --allow-read build.ts"
-        "meson setup build && ninja -C build && sudo ninja -C build install"
+        "meson setup build && ninja -C build"
 	;
       };
 
