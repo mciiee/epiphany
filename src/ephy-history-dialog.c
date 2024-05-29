@@ -46,7 +46,7 @@
 #define NUM_FETCH_LIMIT 15
 
 struct _EphyHistoryDialog {
-  AdwWindow parent_instance;
+  AdwDialog parent_instance;
 
   EphySnapshotService *snapshot_service;
   EphyHistoryService *history_service;
@@ -68,7 +68,7 @@ struct _EphyHistoryDialog {
   GtkWidget *no_search_results_message;
   GtkWidget *action_bars_stack;
   GtkWidget *regular_action_bar;
-  GtkWidget *clear_all_button;
+  GtkWidget *clear_all_row;
   GtkWidget *selection_action_bar;
   GtkWidget *selection_delete_button;
   GtkWidget *selection_open_button;
@@ -90,7 +90,7 @@ struct _EphyHistoryDialog {
   gboolean has_search_results;
 };
 
-G_DEFINE_FINAL_TYPE (EphyHistoryDialog, ephy_history_dialog, ADW_TYPE_WINDOW)
+G_DEFINE_FINAL_TYPE (EphyHistoryDialog, ephy_history_dialog, ADW_TYPE_DIALOG)
 
 enum {
   PROP_0,
@@ -139,13 +139,13 @@ update_ui_state (EphyHistoryDialog *self)
   }
 
   if (incognito_mode) {
-    const char *selection_delete_tooltip = _("It is not possible to modify history when in incognito mode.");
+    const char *selection_delete_tooltip = _("Unavailable in Incognito Mode");
     gtk_widget_set_tooltip_text (self->selection_delete_button, selection_delete_tooltip);
   }
 
   gtk_widget_set_sensitive (self->search_button, has_data);
   gtk_widget_set_sensitive (self->selection_button, has_data);
-  gtk_widget_set_sensitive (self->clear_all_button, has_data && self->can_clear);
+  gtk_widget_set_sensitive (self->clear_all_row, has_data && self->can_clear);
   gtk_widget_set_sensitive (self->selection_open_button, !self->is_selection_empty);
   gtk_widget_set_sensitive (self->selection_delete_button, !self->is_selection_empty && !incognito_mode);
 }
@@ -558,31 +558,6 @@ confirmation_dialog_response_cb (EphyHistoryDialog *self)
   ephy_snapshot_service_delete_all_snapshots (self->snapshot_service);
 }
 
-static GtkWidget *
-confirmation_dialog_construct (EphyHistoryDialog *self)
-{
-  GtkWidget *dialog;
-
-  dialog = adw_message_dialog_new (GTK_WINDOW (self),
-                                   _("Clear Browsing History?"),
-                                   _("Clearing the browsing history will cause all"
-                                     " history links to be permanently deleted."));
-
-  adw_message_dialog_add_responses (ADW_MESSAGE_DIALOG (dialog),
-                                    "cancel", _("_Cancel"),
-                                    "clear", _("Cl_ear"),
-                                    NULL);
-  adw_message_dialog_set_response_appearance (ADW_MESSAGE_DIALOG (dialog),
-                                              "clear",
-                                              ADW_RESPONSE_DESTRUCTIVE);
-
-  g_signal_connect_swapped (dialog, "response::clear",
-                            G_CALLBACK (confirmation_dialog_response_cb),
-                            self);
-
-  return dialog;
-}
-
 static void
 on_search_entry_changed (GtkSearchEntry    *search_entry,
                          EphyHistoryDialog *self)
@@ -790,19 +765,27 @@ on_edge_reached (GtkScrolledWindow *scrolled,
 }
 
 static void
-on_clear_all_button_clicked (GtkButton         *button,
-                             EphyHistoryDialog *self)
+on_clear_all_row_activated (GtkButton         *button,
+                            EphyHistoryDialog *self)
 {
-  if (!self->confirmation_dialog) {
-    GtkWidget **confirmation_dialog;
+  AdwDialog *dialog;
 
-    self->confirmation_dialog = confirmation_dialog_construct (self);
-    confirmation_dialog = &self->confirmation_dialog;
-    g_object_add_weak_pointer (G_OBJECT (self->confirmation_dialog),
-                               (gpointer *)confirmation_dialog);
-  }
+  dialog = adw_alert_dialog_new (_("Clear Browsing History?"),
+                                 _("All links will be permanently deleted"));
 
-  gtk_widget_set_visible (self->confirmation_dialog, TRUE);
+  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dialog),
+                                  "cancel", _("_Cancel"),
+                                  "clear", _("Cl_ear"),
+                                  NULL);
+  adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+                                            "clear",
+                                            ADW_RESPONSE_DESTRUCTIVE);
+
+  g_signal_connect_swapped (dialog, "response::clear",
+                            G_CALLBACK (confirmation_dialog_response_cb),
+                            self);
+
+  adw_dialog_present (dialog, GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (self))));
 }
 
 static void
@@ -840,7 +823,7 @@ shift_activate_cb (EphyHistoryDialog *self)
   if (!self->selection_active)
     return GDK_EVENT_PROPAGATE;
 
-  focused_widget = gtk_window_get_focus (GTK_WINDOW (self));
+  focused_widget = adw_dialog_get_focus (ADW_DIALOG (self));
 
   if (GTK_IS_LIST_BOX_ROW (focused_widget)) {
     g_signal_emit_by_name (self->listbox, "row-activated", focused_widget, self);
@@ -849,17 +832,6 @@ shift_activate_cb (EphyHistoryDialog *self)
   }
 
   return GDK_EVENT_PROPAGATE;
-}
-
-static gboolean
-escape_cb (EphyHistoryDialog *self)
-{
-  if (self->selection_active)
-    set_selection_active (self, FALSE);
-  else
-    gtk_window_close (GTK_WINDOW (self));
-
-  return GDK_EVENT_STOP;
 }
 
 static gboolean
@@ -942,7 +914,7 @@ ephy_history_dialog_class_init (EphyHistoryDialogClass *klass)
   gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, no_search_results_message);
   gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, action_bars_stack);
   gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, regular_action_bar);
-  gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, clear_all_button);
+  gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, clear_all_row);
   gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, selection_action_bar);
   gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, selection_delete_button);
   gtk_widget_class_bind_template_child (widget_class, EphyHistoryDialog, selection_open_button);
@@ -955,7 +927,7 @@ ephy_history_dialog_class_init (EphyHistoryDialogClass *klass)
   gtk_widget_class_bind_template_callback (widget_class, on_selection_cancel_button_clicked);
   gtk_widget_class_bind_template_callback (widget_class, on_search_entry_changed);
   gtk_widget_class_bind_template_callback (widget_class, on_edge_reached);
-  gtk_widget_class_bind_template_callback (widget_class, on_clear_all_button_clicked);
+  gtk_widget_class_bind_template_callback (widget_class, on_clear_all_row_activated);
   gtk_widget_class_bind_template_callback (widget_class, on_selection_delete_button_clicked);
   gtk_widget_class_bind_template_callback (widget_class, on_selection_open_button_clicked);
 
@@ -972,9 +944,6 @@ ephy_history_dialog_class_init (EphyHistoryDialogClass *klass)
                                 (GtkShortcutFunc)shift_activate_cb,
                                 NULL);
 
-  gtk_widget_class_add_binding (widget_class, GDK_KEY_Escape, 0,
-                                (GtkShortcutFunc)escape_cb,
-                                NULL);
   gtk_widget_class_add_binding (widget_class, GDK_KEY_Delete, 0,
                                 (GtkShortcutFunc)delete_selected_cb,
                                 NULL);
@@ -1020,14 +989,14 @@ ephy_history_dialog_init (EphyHistoryDialog *self)
                                 GTK_EDITABLE (self->search_entry));
 
   if (ephy_embed_shell_get_mode (shell) == EPHY_EMBED_SHELL_MODE_INCOGNITO) {
-    tooltip = _("It is not possible to modify history when in incognito mode.");
+    tooltip = _("Unavailable in Incognito Mode");
     set_can_clear (self, FALSE);
   } else {
-    tooltip = _("Remove all history");
+    tooltip = _("Remove All History");
     set_can_clear (self, TRUE);
   }
 
-  gtk_widget_set_tooltip_text (self->clear_all_button, tooltip);
+  gtk_widget_set_tooltip_text (self->clear_all_row, tooltip);
   set_is_loading (self, TRUE);
 
   adw_status_page_set_icon_name (ADW_STATUS_PAGE (self->empty_history_message),

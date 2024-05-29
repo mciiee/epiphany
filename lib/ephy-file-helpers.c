@@ -574,15 +574,23 @@ ephy_ensure_dir_exists (const char  *dir,
 }
 
 static gboolean
-launch_application (GAppInfo *app,
-                    GList    *files)
+launch_application (GAppInfo   *app,
+                    GList      *files,
+                    GdkDisplay *display)
 {
   g_autoptr (GdkAppLaunchContext) context = NULL;
   g_autoptr (GError) error = NULL;
-  GdkDisplay *display;
   gboolean res;
 
-  display = gdk_display_get_default ();
+  if (!display) {
+    GApplication *application = g_application_get_default ();
+    GtkWindow *window = gtk_application_get_active_window (GTK_APPLICATION (application));
+
+    if (window)
+      display = gtk_widget_get_display (GTK_WIDGET (window));
+    if (!display)
+      display = gdk_display_get_default ();
+  }
 
   context = gdk_display_get_app_launch_context (display);
 
@@ -594,55 +602,43 @@ launch_application (GAppInfo *app,
   return res;
 }
 
-static gboolean
-launch_via_uri_handler (GFile *file)
-{
-  const char *uri;
-  GdkDisplay *display;
-  GdkAppLaunchContext *context;
-  g_autoptr (GError) error = NULL;
-
-  display = gdk_display_get_default ();
-  context = gdk_display_get_app_launch_context (display);
-
-  uri = g_file_get_uri (file);
-
-  g_app_info_launch_default_for_uri (uri, G_APP_LAUNCH_CONTEXT (context), &error);
-  if (error) {
-    g_warning ("Failed to launch handler for URI %s: %s", uri, error->message);
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
 /**
- * ephy_file_launch_handler:
+ * ephy_file_launch_uri_handler:
  * @file: a #GFile to pass as argument
  *
- * Launches @file with its default handler application, if @mime_type is %NULL
- * then @file will be queried for its type.
+ * If @mime_type is %NULL, launches @file with its default handler application.
+ * Otherwise, launches @file will the default handler for @mime_type.
  *
  * Returns: %TRUE on success
  **/
 gboolean
-ephy_file_launch_handler (GFile *file)
+ephy_file_launch_uri_handler (GFile      *file,
+                              const char *mime_type,
+                              GdkDisplay *display)
 {
-  GAppInfo *app = NULL;
-  gboolean ret = FALSE;
+  g_autoptr (GAppInfo) app = NULL;
   g_autoptr (GList) list = NULL;
   g_autoptr (GError) error = NULL;
+  gboolean ret = FALSE;
 
   g_assert (file != NULL);
 
   /* Launch via URI handler only under sandbox, because this way loses
    * focus stealing prevention. There's no other way to open a file
    * under sandbox, and focus stealing prevention becomes the
-   * responsibility of the portal in this case anyway. */
-  if (ephy_is_running_inside_sandbox ())
-    return launch_via_uri_handler (file);
+   * responsibility of the portal in this case anyway.
+   */
+  if (ephy_is_running_inside_sandbox ()) {
+    g_autofree char *uri = g_file_get_uri (file);
+    ephy_open_uri_via_flatpak_portal (uri);
+    return TRUE;
+  }
 
-  app = g_file_query_default_handler (file, NULL, &error);
+  if (mime_type)
+    app = g_app_info_get_default_for_type (mime_type, TRUE);
+  if (!app)
+    app = g_file_query_default_handler (file, NULL, &error);
+
   if (!app) {
     g_autofree char *path = g_file_get_path (file);
     g_warning ("No available application to open %s: %s", path, error->message);
@@ -650,54 +646,23 @@ ephy_file_launch_handler (GFile *file)
   }
 
   list = g_list_append (list, file);
-  ret = launch_application (app, list);
+  ret = launch_application (app, list, display);
 
   return ret;
-}
-
-static gboolean
-open_in_default_handler (const char *uri,
-                         const char *mime_type,
-                         GdkDisplay *display)
-{
-  g_autoptr (GdkAppLaunchContext) context = NULL;
-  g_autoptr (GAppInfo) appinfo = NULL;
-  g_autoptr (GError) error = NULL;
-  GList uris;
-
-  context = gdk_display_get_app_launch_context (display ? display : gdk_display_get_default ());
-
-  appinfo = g_app_info_get_default_for_type (mime_type, TRUE);
-  if (!appinfo) {
-    g_warning ("Failed to get default app for MIME type: %s", mime_type);
-    return FALSE;
-  }
-
-  uris.data = (gpointer)uri;
-  uris.next = uris.prev = NULL;
-
-  if (!g_app_info_launch_uris (appinfo, &uris, G_APP_LAUNCH_CONTEXT (context), &error)) {
-    g_warning ("Failed to launch %s: %s", uri, error->message);
-    return FALSE;
-  }
-
-  return TRUE;
 }
 
 gboolean
 ephy_file_open_uri_in_default_browser (const char *uri,
                                        GdkDisplay *display)
 {
-  if (ephy_is_running_inside_sandbox ()) {
-    ephy_open_uri_via_flatpak_portal (uri);
-    return TRUE;
-  }
-  return open_in_default_handler (uri, "x-scheme-handler/http", display);
+  g_autoptr (GFile) file = g_file_new_for_uri (uri);
+  return ephy_file_launch_uri_handler (file, "x-scheme-handler/http", display);
 }
 
 /**
  * ephy_file_browse_to:
  * @file: a #GFile
+ * @display: #GdkDisplay to use for launch context
  *
  * Launches the default application for browsing directories to point to
  * @file. E.g. nautilus will jump to @file within its directory and
@@ -706,16 +671,10 @@ ephy_file_open_uri_in_default_browser (const char *uri,
  * Returns: %TRUE if the launch succeeded
  **/
 gboolean
-ephy_file_browse_to (GFile *file)
+ephy_file_browse_to (GFile      *file,
+                     GdkDisplay *display)
 {
-  g_autofree char *uri = g_file_get_uri (file);
-
-  if (ephy_is_running_inside_sandbox ()) {
-    ephy_open_directory_via_flatpak_portal (uri);
-    return TRUE;
-  }
-
-  return open_in_default_handler (uri, "inode/directory", NULL);
+  return ephy_file_launch_uri_handler (file, "inode/directory", display);
 }
 
 /**
@@ -754,7 +713,7 @@ ephy_file_delete_dir_recursively (const char  *directory,
 
         g_set_error (error, G_IO_ERROR,
                      g_io_error_from_errno (errsv),
-                     "Error removing file %s: %s",
+                     _("Error removing file %s: %s"),
                      file_path, g_strerror (errsv));
         failed = TRUE;
       }
@@ -772,7 +731,7 @@ ephy_file_delete_dir_recursively (const char  *directory,
 
       g_set_error (error, G_IO_ERROR,
                    g_io_error_from_errno (errsv),
-                   "Error removing directory %s: %s",
+                   _("Error removing directory %s: %s"),
                    directory, g_strerror (errsv));
       failed = TRUE;
     }

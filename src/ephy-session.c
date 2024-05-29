@@ -677,11 +677,35 @@ save_data_free (SaveData *data)
   g_free (data);
 }
 
+static gboolean
+should_save_url (const char *url)
+{
+  /* NULL URLs are possible when an invalid URL is opened by JS.
+   * E.g. <script>win = window.open("blah", "WIN");</script>
+   */
+  if (!url)
+    return FALSE;
+
+  /* Blank URLs can occur in some situations. Just ignore these, as they
+   * are harmless and not an indicator of a corrupted session.
+   */
+  if (strcmp (url, "") == 0)
+    return FALSE;
+
+  if (g_str_has_prefix (url, "blob:") || g_str_has_prefix (url, "data:"))
+    return FALSE;
+
+  return TRUE;
+}
+
 static int
 write_tab (xmlTextWriterPtr  writer,
            SessionTab       *tab)
 {
   int ret;
+
+  if (!should_save_url (tab->url))
+    return 0;
 
   ret = xmlTextWriterStartElement (writer, (xmlChar *)"embed");
   if (ret < 0)
@@ -845,22 +869,27 @@ save_session_in_thread_finished_cb (GObject      *source_object,
 static gboolean
 session_seems_reasonable (GList *windows)
 {
+  /* The goal here is to check for a *corrupted* session. It's perfectly fine
+   * for the session to contain URLs that cannot actually be saved, including
+   * data, blob, empty, and NULL URLs.
+   *
+   * The most common indicator of session corruption is if it contains an
+   * HTTP/HTTPS URL with no host component, so that's what we're really checking
+   * for here.
+   *
+   * Of course the session is not supposed to become corrupted in the first
+   * place, but it's been known to happen if WebKit or Epiphany is seriously
+   * broken for some reason. If we have never successfully loaded any page, or
+   * any web view has a bad URL, then something has probably gone wrong inside
+   * WebKit. Do not clobber an existing good session file with our new bogus
+   * state. Bug #768250.
+   */
   for (GList *w = windows; w != NULL; w = w->next) {
     for (GList *t = ((SessionWindow *)w->data)->tabs; t != NULL; t = t->next) {
       const char *url = ((SessionTab *)t->data)->url;
       g_autoptr (GUri) uri = NULL;
-      gboolean sane = FALSE;
 
-      /* NULL URLs are possible when an invalid URL is opened by JS.
-       * E.g. <script>win = window.open("blah", "WIN");</script>
-       */
-      if (url == NULL)
-        continue;
-
-      /* Blank URLs can occur in some situations. Just ignore these, as they
-       * are harmless and not an indicator of a corrupted session.
-       */
-      if (strcmp (url, "") == 0)
+      if (!should_save_url (url))
         continue;
 
       /* Ignore fake about "URLs." */
@@ -870,17 +899,14 @@ session_seems_reasonable (GList *windows)
       uri = g_uri_parse (url, G_URI_FLAGS_PARSE_RELAXED, NULL);
       if (uri) {
         if (g_uri_get_host (uri) != NULL ||
-            strcmp (g_uri_get_scheme (uri), "data") == 0 ||
             strcmp (g_uri_get_scheme (uri), "file") == 0 ||
             strcmp (g_uri_get_scheme (uri), "ephy-reader") == 0 ||
             strcmp (g_uri_get_scheme (uri), "view-source") == 0)
-          sane = TRUE;
+          continue;
       }
 
-      if (!sane) {
-        g_critical ("Refusing to save session due to invalid URL %s", url);
-        return FALSE;
-      }
+      g_critical ("Refusing to save session due to invalid URL %s", url);
+      return FALSE;
     }
   }
 
@@ -990,20 +1016,13 @@ ephy_session_save_timeout_cb (EphySession *session)
   if (!session->loaded_page)
     return G_SOURCE_REMOVE;
 
-  /* If we have never successfully loaded any page, or any web view has an
-   * insane URL, then something has probably gone wrong inside WebKit. For
-   * instance, if the web process is nonfunctional, the UI process could have
-   * an invalid URI property. Yes, this would be a WebKit bug, but Epiphany
-   * should be robust to such issues. Do not clobber an existing good session
-   * file with our new bogus state. Bug #768250.
-   */
   data = save_data_new (session);
   if (!session_seems_reasonable (data->windows)) {
     save_data_free (data);
     return G_SOURCE_REMOVE;
   }
 
-  LOG ("ephy_sesion_save");
+  LOG ("ephy_session_save");
 
   if (ephy_shell_get_n_windows (shell) == 0) {
     session_delete (session);
@@ -1639,7 +1658,7 @@ ephy_session_load (EphySession         *session,
   g_assert (EPHY_IS_SESSION (session));
   g_assert (filename);
 
-  LOG ("ephy_sesion_load %s", filename);
+  LOG ("ephy_session_load %s", filename);
 
   g_application_hold (G_APPLICATION (ephy_shell_get_default ()));
 

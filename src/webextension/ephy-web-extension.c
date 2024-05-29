@@ -818,19 +818,22 @@ ephy_web_extension_parse_command_key (const char *suggested_key)
     const char *key = keys[i];
     /* First two are potentially modifiers. We should check for duplicates but its probably harmless. */
     if (i == 0 || i == 1) {
-      if (strcmp (key, "Ctrl") == 0 || strcmp (key, "Alt") == 0 || (i == 1 && strcmp (key, "Shift") == 0))
+      if (strcmp (key, "Ctrl") == 0 || strcmp (key, "Alt") == 0 || (i == 1 && strcmp (key, "Shift") == 0)) {
         g_string_append_printf (accelerator, "<%s>", key);
-      else if (strcmp (key, "Command") == 0 || strcmp (key, "MacCtrl") == 0)
+        has_modifier = TRUE;
+        continue;
+      } else if (strcmp (key, "Command") == 0 || strcmp (key, "MacCtrl") == 0) {
         g_string_append (accelerator, "<Ctrl>");
-      else {
+        has_modifier = TRUE;
+        continue;
+      } else if (i == 0 || !is_valid_key (key)) {
         g_debug ("Invalid modifier at index %u: %s", i, key);
         return NULL;
       }
-      has_modifier = TRUE;
-      continue;
     }
+
     /* Second two are potentially keys. */
-    else if (i == 1 || i == 2) {
+    if (i == 1 || i == 2) {
       if (has_key) {
         g_debug ("Command key has two keys: %s", suggested_key);
         return NULL;
@@ -839,13 +842,29 @@ ephy_web_extension_parse_command_key (const char *suggested_key)
         g_debug ("Command key has invalid_key: %s", key);
         return NULL;
       }
-      g_string_append (accelerator, key);
+      if (strcmp (key, "Space") == 0)
+        g_string_append (accelerator, "space");
+      else if (strcmp (key, "Period") == 0)
+        g_string_append (accelerator, "period");
+      else if (strcmp (key, "Comma") == 0)
+        g_string_append (accelerator, "comma");
+      else if (strcmp (key, "PageUp") == 0)
+        g_string_append (accelerator, "Page_Up");
+      else if (strcmp (key, "PageDown") == 0)
+        g_string_append (accelerator, "Page_Down");
+      else
+        g_string_append (accelerator, key);
       has_key = TRUE;
     }
   }
 
   if (!has_modifier && !has_key) {
     g_debug ("Command key requires a modifier and a key: %s", suggested_key);
+    return NULL;
+  }
+
+  if (!gtk_accelerator_parse (accelerator->str, NULL, NULL)) {
+    g_warning ("Transformed WebExtensions accelerator %s into %s, but this is not a valid GTK accelerator", suggested_key, accelerator->str);
     return NULL;
   }
 
@@ -1002,32 +1021,32 @@ ephy_web_extension_parse_manifest (EphyWebExtension  *self,
 
   manifest = ephy_web_extension_get_resource (self, "manifest.json", &length);
   if (!manifest) {
-    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, "manifest.json not found");
+    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, _("manifest.json not found"));
     return FALSE;
   }
 
   parser = json_parser_new ();
   if (!json_parser_load_from_data (parser, (const char *)manifest, length, &local_error)) {
-    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, "Failed to parse manifest.json: %s", local_error->message);
+    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, _("Failed to parse manifest.json: %s"), local_error->message);
     return FALSE;
   }
 
   root = json_parser_get_root (parser);
   if (!root || json_node_get_node_type (root) != JSON_NODE_OBJECT) {
-    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, "manifest.json invalid");
+    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, _("manifest.json invalid"));
     return FALSE;
   }
 
   root_object = json_node_get_object (root);
   if (!root_object) {
-    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, "manifest.json invalid");
+    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, _("manifest.json invalid"));
     return FALSE;
   }
 
   self->manifest = g_strndup ((char *)manifest, length);
   self->manifest_version = ephy_json_object_get_int (root_object, "manifest_version");
   if (self->manifest_version != 2) {
-    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, "Only manifest_version 2 is supported");
+    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, _("Only manifest_version 2 is supported"));
     return FALSE;
   }
 
@@ -1044,7 +1063,7 @@ ephy_web_extension_parse_manifest (EphyWebExtension  *self,
     self->content_security_policy = g_strdup ("script-src 'self'; object-src 'self';");
 
   if (!*self->version || !*self->name) {
-    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, "Missing name or version");
+    g_set_error (error, WEB_EXTENSION_ERROR, WEB_EXTENSION_ERROR_INVALID_MANIFEST, _("Missing name or version"));
     return FALSE;
   }
 

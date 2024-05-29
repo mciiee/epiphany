@@ -226,7 +226,7 @@ ephy_web_application_delete (const char      *id,
   /* If there's no profile dir for this app, it means it does not
    * exist. */
   if (!g_file_test (profile_dir, G_FILE_TEST_IS_DIR)) {
-    g_warning ("No application with id '%s' is installed.\n", id);
+    g_warning ("No application with id '%s' is installed.", id);
     if (out_app_found)
       *out_app_found = EPHY_WEB_APP_NOT_FOUND;
     return FALSE;
@@ -788,23 +788,22 @@ ephy_web_application_free_application_list (GList *list)
  * when running under Flatpak, because we return it over D-Bus in the
  * WebAppProvider service.
  *
- * Returns: (transfer-full): a %NULL-terminated array of strings
+ * Returns: (transfer-full): a %NULL-terminated array of strings, which may be empty
  **/
 char **
 ephy_web_application_get_desktop_id_list (void)
 {
   g_autoptr (GFileEnumerator) children = NULL;
   g_autoptr (GFile) parent_directory = NULL;
-  GPtrArray *desktop_file_ids;
+  g_autoptr (GPtrArray) desktop_file_ids = g_ptr_array_new_with_free_func (g_free);
 
   parent_directory = g_file_new_for_path (g_get_user_data_dir ());
   children = g_file_enumerate_children (parent_directory,
                                         "standard::name",
                                         0, NULL, NULL);
   if (!children)
-    return NULL;
+    goto out;
 
-  desktop_file_ids = g_ptr_array_new_with_free_func (g_free);
   for (;;) {
     g_autoptr (GFileInfo) info = g_file_enumerator_next_file (children, NULL, NULL);
     const char *name;
@@ -820,9 +819,10 @@ ephy_web_application_get_desktop_id_list (void)
     }
   }
 
+out:
   g_ptr_array_add (desktop_file_ids, NULL);
 
-  return (char **)g_ptr_array_free (desktop_file_ids, FALSE);
+  return (char **)g_ptr_array_free (g_steal_pointer (&desktop_file_ids), FALSE);
 }
 
 /**
@@ -983,7 +983,7 @@ ephy_web_application_save (EphyWebApplication *app)
   g_assert (!ephy_is_running_inside_sandbox ());
 
   if (!g_file_get_contents (app->desktop_path, &contents, NULL, &error)) {
-    g_warning ("Failed to load desktop file of web application: %s\n", error->message);
+    g_warning ("Failed to load desktop file of web application: %s", error->message);
     return FALSE;
   }
 
@@ -1030,7 +1030,7 @@ ephy_web_application_save (EphyWebApplication *app)
 
     saved = g_key_file_save_to_file (keyfile, resolved_path, &error);
     if (!saved)
-      g_warning ("Failed to save web application %s desktop file %s: %s\n", app->name, resolved_path, error->message);
+      g_warning ("Failed to save web application %s desktop file %s: %s", app->name, resolved_path, error->message);
     free (resolved_path);
   }
 

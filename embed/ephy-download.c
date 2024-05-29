@@ -431,13 +431,13 @@ ephy_download_do_download_action (EphyDownload           *download,
     case EPHY_DOWNLOAD_ACTION_BROWSE_TO:
       LOG ("ephy_download_do_download_action: browse_to");
       /* Must not use this action type under sandbox! */
-      ret = ephy_file_browse_to (destination);
+      ret = ephy_file_browse_to (destination, NULL);
       break;
     case EPHY_DOWNLOAD_ACTION_OPEN:
       LOG ("ephy_download_do_download_action: open");
-      ret = ephy_file_launch_handler (destination);
+      ret = ephy_file_launch_uri_handler (destination, NULL, NULL);
       if (!ret)
-        ret = ephy_file_browse_to (destination);
+        ret = ephy_file_browse_to (destination, NULL);
       break;
     case EPHY_DOWNLOAD_ACTION_NONE:
       LOG ("ephy_download_do_download_action: none");
@@ -1008,7 +1008,7 @@ download_finished_cb (WebKitDownload *wk_download,
   file = g_file_new_for_path (webkit_download_get_destination (wk_download));
   download->file_monitor = g_file_monitor (file, G_FILE_MONITOR_NONE, NULL, &error);
   if (!download->file_monitor)
-    g_warning ("Could not add a file monitor for %s, error: %s\n", g_file_get_uri (file), error->message);
+    g_warning ("Could not add a file monitor for %s, error: %s", g_file_get_uri (file), error->message);
   else
     g_signal_connect_object (download->file_monitor, "changed", G_CALLBACK (download_file_monitor_changed), download, 0);
 }

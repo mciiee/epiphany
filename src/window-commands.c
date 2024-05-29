@@ -882,14 +882,11 @@ window_cmd_show_history (GSimpleAction *action,
                          GVariant      *parameter,
                          gpointer       user_data)
 {
-  GtkWidget *dialog;
+  AdwDialog *dialog;
 
-  dialog = ephy_shell_get_history_dialog (ephy_shell_get_default ());
+  dialog = ADW_DIALOG (ephy_shell_get_history_dialog (ephy_shell_get_default ()));
 
-  if (GTK_WINDOW (user_data) != gtk_window_get_transient_for (GTK_WINDOW (dialog)))
-    gtk_window_set_transient_for (GTK_WINDOW (dialog),
-                                  GTK_WINDOW (user_data));
-  gtk_window_present (GTK_WINDOW (dialog));
+  adw_dialog_present (dialog, user_data);
 }
 
 void
@@ -912,15 +909,11 @@ window_cmd_show_preferences (GSimpleAction *action,
                              GVariant      *parameter,
                              gpointer       user_data)
 {
-  GtkWindow *dialog;
+  AdwDialog *dialog;
 
-  dialog = GTK_WINDOW (ephy_shell_get_prefs_dialog (ephy_shell_get_default ()));
+  dialog = ADW_DIALOG (ephy_shell_get_prefs_dialog (ephy_shell_get_default ()));
 
-  if (GTK_WINDOW (user_data) != gtk_window_get_transient_for (dialog))
-    gtk_window_set_transient_for (dialog,
-                                  GTK_WINDOW (user_data));
-
-  gtk_window_present (dialog);
+  adw_dialog_present (dialog, user_data);
 }
 
 static void
@@ -998,7 +991,7 @@ window_cmd_show_about (GSimpleAction *action,
                        gpointer       user_data)
 {
   EphyWindow *window = EPHY_WINDOW (user_data);
-  AdwAboutWindow *dialog;
+  AdwAboutDialog *dialog;
   char *debug_info;
   GKeyFile *key_file;
   GBytes *bytes;
@@ -1054,39 +1047,36 @@ window_cmd_show_about (GSimpleAction *action,
     authors[author_index++] = g_strdup (contributors[index]);
   }
 
-  dialog = ADW_ABOUT_WINDOW (adw_about_window_new ());
-
-  if (window)
-    gtk_window_set_transient_for (GTK_WINDOW (dialog), GTK_WINDOW (window));
+  dialog = ADW_ABOUT_DIALOG (adw_about_dialog_new ());
 
   if (g_str_equal (PROFILE, "Canary"))
-    adw_about_window_set_application_name (dialog, _("Epiphany Canary"));
+    adw_about_dialog_set_application_name (dialog, _("Epiphany Canary"));
   else {
 #if !TECH_PREVIEW
-    adw_about_window_set_application_name (dialog, _("Web"));
+    adw_about_dialog_set_application_name (dialog, _("Web"));
 #else
-    adw_about_window_set_application_name (dialog, _("Epiphany Technology Preview"));
+    adw_about_dialog_set_application_name (dialog, _("Epiphany Technology Preview"));
 #endif
   }
 
-  adw_about_window_set_version (dialog, VERSION);
-  adw_about_window_set_copyright (dialog,
+  adw_about_dialog_set_version (dialog, VERSION);
+  adw_about_dialog_set_copyright (dialog,
                                   "Copyright © 2002–2004 Marco Pesenti Gritti\n"
                                   "Copyright © 2003–2023 The GNOME Web Developers");
-  adw_about_window_set_developer_name (dialog, _("The GNOME Project"));
+  adw_about_dialog_set_developer_name (dialog, _("The GNOME Project"));
 
-  adw_about_window_set_debug_info (dialog, debug_info);
-  adw_about_window_set_license_type (dialog, GTK_LICENSE_GPL_3_0);
-  adw_about_window_set_website (dialog, "https://apps.gnome.org/Epiphany");
-  adw_about_window_set_application_icon (dialog, APPLICATION_ID);
+  adw_about_dialog_set_debug_info (dialog, debug_info);
+  adw_about_dialog_set_license_type (dialog, GTK_LICENSE_GPL_3_0);
+  adw_about_dialog_set_website (dialog, "https://apps.gnome.org/Epiphany");
+  adw_about_dialog_set_application_icon (dialog, APPLICATION_ID);
 
-  adw_about_window_set_developers (dialog, (const char **)authors);
-  adw_about_window_set_designers (dialog, (const char **)artists);
-  adw_about_window_set_documenters (dialog, (const char **)documenters);
-  adw_about_window_set_translator_credits (dialog, _("translator-credits"));
-  adw_about_window_set_issue_url (dialog, "https://gitlab.gnome.org/GNOME/epiphany/-/issues/new");
+  adw_about_dialog_set_developers (dialog, (const char **)authors);
+  adw_about_dialog_set_designers (dialog, (const char **)artists);
+  adw_about_dialog_set_documenters (dialog, (const char **)documenters);
+  adw_about_dialog_set_translator_credits (dialog, _("translator-credits"));
+  adw_about_dialog_set_issue_url (dialog, "https://gitlab.gnome.org/GNOME/epiphany/-/issues/new");
 
-  gtk_window_present (GTK_WINDOW (dialog));
+  adw_dialog_present (ADW_DIALOG (dialog), GTK_WIDGET (window));
 
   g_free (debug_info);
   g_strfreev (artists);
@@ -1689,7 +1679,9 @@ download_failed_cb (WebKitDownload            *download,
                     GError                    *error,
                     EphyApplicationDialogData *data)
 {
-  g_warning ("Failed to download web app icon: %s", error->message);
+  WebKitURIRequest *request = webkit_download_get_request (download);
+  g_warning ("Failed to download web app icon %s: %s", webkit_uri_request_get_uri (request), error->message);
+
   g_signal_handlers_disconnect_by_func (download, download_finished_cb, data);
   /* Something happened, default to a page snapshot. */
   set_image_from_favicon (data);
@@ -1984,6 +1976,11 @@ download_manifest_finished_cb (WebKitDownload            *download,
   manifest_object = json_node_get_object (root);
 
   icons = ephy_json_object_get_array (manifest_object, "icons");
+  if (!icons) {
+    start_fallback (data);
+    return;
+  }
+
   for (guint i = 0; i < json_array_get_length (icons); i++) {
     g_auto (GStrv) size = NULL;
     const char *sizes;
@@ -2012,11 +2009,20 @@ download_manifest_finished_cb (WebKitDownload            *download,
   }
 
   icon = ephy_json_array_get_object (icons, pos);
+  if (!icon) {
+    start_fallback (data);
+    return;
+  }
+
   str = ephy_json_object_get_string (icon, "src");
+  if (!str) {
+    start_fallback (data);
+    return;
+  }
 
   if (ephy_embed_utils_address_has_web_scheme (str))
     uri = g_strdup (str);
-  else if (g_str_has_suffix (uri, "/"))
+  else if (g_str_has_suffix (data->url, "/"))
     uri = g_strdup_printf ("%s%s", data->url, str);
   else
     uri = g_strdup_printf ("%s/%s", data->url, str);
